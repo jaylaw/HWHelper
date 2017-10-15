@@ -2,10 +2,11 @@ import json
 import requests
 import time
 import urllib
-
+from dbhelper import DBHelper
 
 TOKEN = "330022198:AAGBcFDf19unG_oR8QLrZjAN14Z6ffgqBkg"
 URL = "https://api.telegram.org/bot{}/".format(TOKEN)
+db = DBHelper()
 
 
 def get_url(url):
@@ -43,29 +44,66 @@ def get_last_update_id(updates):
         return max(update_ids)
 
 
-def echo_all(updates):
+# def echo_all(updates):
+#     for update in updates['result']:
+#         try:
+#             text = update['message']['text']
+#             chat = update['message']['chat']['id']
+#             send_message(text, chat)
+#         except Exception as e:
+#             print(e)
+
+def handle_updates(updates):
     for update in updates['result']:
-        try:
-            text = update['message']['text']
-            chat = update['message']['chat']['id']
-            send_message(text, chat)
-        except Exception as e:
-            print(e)
+        text = update['message']['text']
+        chat = update['message']['chat']['id']
+        assignments = db.get_assignments(chat)
+        if text == '/done':
+            keyboard = build_keyboard(assignments)
+            send_message('Which assignment did you complete?', chat, keyboard)
+        elif text == "/start":
+            send_message(
+                "Welcome to your personal Homework list. Send any text to me "
+                "and I'll store it as an assignment. Send /done to remove "
+                "assignments.",
+                chat)
+        elif text.startswith("/"):
+            continue
+        elif text in assignments:
+            db.delete_assignment(text, chat)
+            assignments = db.get_assignments(chat)
+            keyboard = build_keyboard(assignments)
+            send_message('Which assignment did you complete?', chat, keyboard)
+        else:
+            db.add_assignment(text, chat)
+            assignments = db.get_assignments(chat)
+            message = '\n'.join(assignments)
+            send_message(message, chat)
 
 
-def send_message(text, chat_id):
+def build_keyboard(assignments):
+    keyboard = [[assignment] for assignment in assignments]
+    reply_markup = {"keyboard": keyboard, "one_time_keyboard": True}
+    return json.dumps(reply_markup)
+
+
+def send_message(text, chat_id, reply_markup=None):
     text = urllib.parse.quote_plus(text)
-    url = URL + "sendMessage?text={}&chat_id={}".format(text, chat_id)
+    url = URL + "sendMessage?text={}&chat_id={}&parse_mode=Markdown".format(
+        text, chat_id)
+    if reply_markup:
+        url += "&reply_markup={}".format(reply_markup)
     get_url(url)
 
 
 def main():
+    db.setup()
     last_update_id = None
     while True:
         updates = get_updates(last_update_id)
         if len(updates["result"]) > 0:
             last_update_id = get_last_update_id(updates) + 1
-            echo_all(updates)
+            handle_updates(updates)
         time.sleep(0.5)
 
 
